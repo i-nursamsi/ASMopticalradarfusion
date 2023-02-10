@@ -1,13 +1,19 @@
+//Feature-level multispectral and radar data fusion to map ASM
+//Written in GEE (JavaScript)
+//Author: ILYAS NURSAMSI
+
 // center the map
-Map.centerObject(roi);
+Map.centerObject(geometry);
 
 
+
+//*****************************************************************
+//          CALLING ALL OF THE DATA NEEDED
+//*****************************************************************
 
 //South Kalimantan as ROI for current version of the code. 
 var SK = ee.FeatureCollection(SouthKalimantan);
 Map.addLayer(SK, {}, "South Kalimantan");
-
-
 
 
 //merge the training class
@@ -16,9 +22,13 @@ var classNames = ASGM.merge(Forest).merge(nonforestVeg).merge(settlements).merge
 //check the class
 print(classNames);
 
-var startDate = '2020-01-01';
-var endDate = '2020-12-31';
 
+// SET THE VARIABLE START AND END OF DATES
+var startDate = '2021-01-01';
+var endDate = '2021-12-31';
+
+
+/// ---------------- CALLING the Landsat 8 data products -------------------///
 //masking the cloud function
 function maskL8srClouds(image) {
   // Bits 3 and 5 are cloud shadow and cloud, respectively.
@@ -43,8 +53,13 @@ var l8Filt = l8.filterBounds(SK)
 var compositel8 = l8Filt.median().clip(SK);
 
 Map.addLayer(compositel8,{bands:['B4','B3','B2'],min:300,max:3000},
-             'Composite L8 2019');
+             'Composite L8 2021');
 
+
+// WHAT BAND(S) IS BEST USED FOR ASSM MAPPING
+// DO I ALSO NEED TO CONDUCT SPATIAL ANALYSIS ON WHICH BANDS IS/ARE THE BEST?
+
+// maybe add the OIM-MSWI ratio??
 
 /// ------ ADDING Sentinel 2 products ----- /////
 // We will use the Sentinel-2 Surface Reflection product.
@@ -68,8 +83,8 @@ function maskS2srClouds(image) {
 
 //a function to rename the band
 function renameBandsETM(image) {
-    var bands = ['B2','B3', 'B4', 'B5'];
-    var new_bands = ['sB2','sB3', 'sB4', 'sB5'];
+    var bands = ['B1','B2','B3', 'B4', 'B5','B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12'];
+    var new_bands = ['sB1','sB2','sB3', 'sB4', 'sB5', 'sB6', 'sB7', 'sB8', 'B8A', 'sB9', 'sB11', 'sB12'];
     return image.select(bands).rename(new_bands);
 }
 
@@ -97,16 +112,66 @@ var s2composite = s2Filt.median().clip(SK); // can be changed to mean, min, etc
 Map.addLayer(s2composite,{bands:['sB4','sB3','sB2'],min:0.02,max:0.3,
                           gamma:1.5},'Sentinel-2 2019 composite');
 
+/// generate Sentine-1 average of VH and VV polarization data for 2020.
+// Sentinel-1 is from the European Space Agency (ESA) and operates at C-band in VV and VH polarization.
+// VH or HV are more sensitive to volume and plants.  VV is about roughness such as surface waves on water.
+var pol = 'VH';
+var pol2 = 'VV';
+
+// Define resolution, will also be used to define the output resolution\
+// The possible resolutions are 10, 25, or 40 meters
+var res = 10;
+
+var collectionVH = ee.ImageCollection('COPERNICUS/S1_GRD')
+   .filterBounds(SK)
+   .filterDate(startDate, endDate)
+   .select(pol);
+
+var collectionVV = ee.ImageCollection('COPERNICUS/S1_GRD')
+   .filterBounds(SK)
+   .filterDate(startDate, endDate)
+   .select(pol2);
+
+//Compute the mean of the Sentinel-1 data collection over the period specfied above by start and end. 
+//Then rename that band as 's1vh' so we can call and access it directly later
+var S1_VH_mean = collectionVH.reduce(ee.Reducer.mean()).rename('s1vh');
+var S1_VV_mean = collectionVV.reduce(ee.Reducer.mean()).rename('s1vv');
+
+var s1Vis = {
+  min: -20,
+  max: -5,
+};
+
+S1_VH_mean = S1_VH_mean.clip(SK);
+S1_VV_mean = S1_VV_mean.clip(SK);
 
 
-// ============ PRE-PROCESSING  ================= //
+
+//The Map.addLayer simply displays the image with the visualization parameters specfied above and inserted in command below.
+// Let's called that displayed image as 'Sentinel-1 VH'
+Map.addLayer(S1_VH_mean, s1Vis, 'Sentinel-1 VH');
+Map.addLayer(S1_VV_mean, s1Vis, 'Sentinel-1 VV');
+
+var s1composite = S1_VH_mean.addBands(S1_VV_mean)
+
+print(s1composite.bandNames())
+// Use these bands for prediction.
+//var bands = ['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11','s1vh', 's1vv', 'sB3','sB4','sB5'];  
+
+//  Now add that Sentinel-1 mean backscksatter to the stack of Landsat bands with the following command:
+var allimages = compositel8.addBands(S1_VH_mean);
+var allimages = allimages.addBands(S1_VV_mean);
+var allimages = allimages.addBands(s2composite);
+
+// ===============================================//
+//             PRE-PROCESSING                     //
+// ===============================================//
+
 
 // ============ BRDF CORRECTION ================= //
+
 // This snippet is adapted from:
 //     mdpi.com/2072-4292/11/7/831/htm#app1-remotesensing-11-00831
-    
-    
-    
 
 var PI = ee.Number(3.14159265359);
 var MAX_SATELLITE_ZENITH = 7.5;
@@ -253,6 +318,10 @@ exports.brdfL8 = function(collection) {
           .rename(['viewZen']);
     return viewZenith.multiply(PI.divide(180));
   }
+  
+  // do i need to make another function here to calculate the geometry of the image?
+  
+  
   
   //  apply function to all bands
   // 
@@ -630,13 +699,381 @@ function _apply(image, kvol, kvol0){
 
 };
 
-// =========================== END OF BRDF ======================= //
+// =========================== END OF BRDF for Sentinel-2 ======================= //
+
+//================================================================================//
+// ============================= START OF BRDF for Landsat-8 =====================//
+//================================================================================//
+// Script to correct Landsat data for BRDF effects using a c-factor approach as published in:
+// D.P. Roy, H.K. Zhang, J. Ju, J.L. Gomez-Dans, P.E. Lewis, C.B. Schaaf, Q. Sun, J. Li, H. Huang, V. Kovalskyy, A general method to normalize Landsat reflectance data to nadir BRDF adjusted reflectance, Remote Sensing of Environment, Volume 176, April 2016, Pages 255-271
+// Interpreted and coded here by Daniel Wiell and Erik Lindquist of the United Nations Food and Agriculture Organization
+
+var vizParams = {bands: 'red, green, blue', min: '200, 400, 600', max: '2400, 2200, 2400', gamma: 1.2}
+var vizParamsFalse = {bands: 'nir, swir1, red', min: 0, max: 5000, gamma: 1.7}
+
+// ************** LANDSAT/LC8_L1T_TOA_FMASK **************
+
+var landsat8FmaskBands = {blue: 'B2', green: 'B3', red: 'B4', nir: 'B5', swir1: 'B6', swir2: 'B7', cirrus: 'B9', thermal: 'B10', fmask: 'fmask'}
+var image1 = ee.Image('LANDSAT/LC8_L1T_TOA_FMASK/LC81780592016030LGN00')
+.select(['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B9', 'B10', 'fmask'],
+['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'cirrus', 'thermal', 'fmask']);
+//.select(['B1', 'B2', 'B3', 'B4', 'B5', 'B7', 'B6_VCID_1', 'fmask'],
+//['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'thermal', 'fmask']);
+
+var image2 = ee.Image('LANDSAT/LC8_L1T_TOA_FMASK/LC81790592016037LGN01')
+.select(['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B9', 'B10', 'fmask'],
+['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'cirrus', 'thermal', 'fmask']);
+//.select(['B1', 'B2', 'B3', 'B4', 'B5', 'B7', 'B6_VCID_1', 'fmask'],
+//['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'thermal', 'fmask']);
+
+//Map.addLayer(image1.multiply(10000), vizParamsFalse, 'Image 1, uncorrected')
+//Map.addLayer(image2.multiply(10000), vizParamsFalse, 'Image 2, uncorrected')
+
+// ************** APPLY BRDF CORRECTION ***************
+
+var image1BRDF = brdfCorrect(image1);
+var image2BRDF = brdfCorrect(image2);
+
+//Map.addLayer(image1BRDF.multiply(10000), vizParamsFalse, 'Image 1, corrected')
+//Map.addLayer(image2BRDF.multiply(10000), vizParamsFalse, 'Image 2, corrected')
+  
+// ************** BRDF CORRECTION **************
+  
+    function brdfCorrect(image) {
+      var inputBandNames = image.bandNames() 
+      var constants = {
+        pi: Math.PI
+      }
+
+      var coefficientsByBand = {
+        'blue': {fiso: 0.0774, fgeo: 0.0079, fvol: 0.0372},
+        'green': {fiso: 0.1306, fgeo: 0.0178, fvol: 0.0580},
+        'red': {fiso: 0.1690, fgeo: 0.0227, fvol: 0.0574},
+        'nir': {fiso: 0.3093, fgeo: 0.0330, fvol: 0.1535},
+        'swir1': {fiso: 0.3430, fgeo: 0.0453, fvol: 0.1154},
+        'swir2': {fiso: 0.2658, fgeo: 0.0387, fvol: 0.0639}
+      }
+      
+      var corners = findCorners()
+      
+      viewAngles()
+      solarPosition()
+      sunZenOut()
+      set('relativeSunViewAz', 'i.sunAz - i.viewAz')
+      rossThick('kvol', 'i.sunZen', 'i.viewZen', 'i.relativeSunViewAz')
+      rossThick('kvol0', 'i.sunZenOut', 0, 0)
+      liThin('kgeo', 'i.sunZen', 'i.viewZen', 'i.relativeSunViewAz')
+      liThin('kgeo0', 'i.sunZenOut', 0, 0)
+      adjustBands()
+      return image.select(inputBandNames)
+      
+
+      function viewAngles() {
+        var maxDistanceToSceneEdge = 1000000
+        var maxSatelliteZenith = 7.5
+        var upperCenter = pointBetween(corners.upperLeft, corners.upperRight)
+        var lowerCenter = pointBetween(corners.lowerLeft, corners.lowerRight)
+        var slope = slopeBetween(lowerCenter, upperCenter)
+        var slopePerp = ee.Number(-1).divide(slope)
+        set('viewAz',
+          ee.Image(ee.Number(Math.PI / 2).subtract((slopePerp).atan())))
+    
+        var leftLine = toLine(corners.upperLeft, corners.lowerLeft)
+        var rightLine = toLine(corners.upperRight, corners.lowerRight)
+        var leftDistance = ee.FeatureCollection(leftLine).distance(maxDistanceToSceneEdge)
+        var rightDistance = ee.FeatureCollection(rightLine).distance(maxDistanceToSceneEdge)
+        var viewZenith = rightDistance.multiply(maxSatelliteZenith * 2)
+          .divide(rightDistance.add(leftDistance))
+          .subtract(maxSatelliteZenith)
+        set('viewZen',
+          viewZenith.multiply(Math.PI).divide(180))
+      }
+    
+      function solarPosition() {
+        // Ported from http://pythonfmask.org/en/latest/_modules/fmask/landsatangles.html
+        var date = ee.Date(ee.Number(image.get('system:time_start')))
+        var secondsInHour = 3600
+        set('longDeg',
+          ee.Image.pixelLonLat().select('longitude'))
+        set('latRad',
+          ee.Image.pixelLonLat().select('latitude')
+            .multiply(Math.PI).divide(180))
+        set('hourGMT',
+          ee.Number(date.getRelative('second', 'day')).divide(secondsInHour))
+        set('jdp', // Julian Date Proportion
+          date.getFraction('year'))
+        set('jdpr', // Julian Date Proportion in Radians
+          'i.jdp * 2 * {pi}')
+        set('meanSolarTime',
+          'i.hourGMT + i.longDeg / 15')
+        set('localSolarDiff',
+          '(0.000075 + 0.001868 * cos(i.jdpr) - 0.032077 * sin(i.jdpr)' +
+          '- 0.014615 * cos(2 * i.jdpr) - 0.040849 * sin(2 * i.jdpr))' +
+          '* 12 * 60 / {pi}')
+        set('trueSolarTime',
+          'i.meanSolarTime + i.localSolarDiff / 60 - 12')
+        set('angleHour',
+          'i.trueSolarTime * 15 * {pi} / 180')
+        set('delta',
+          '0.006918 - 0.399912 * cos(i.jdpr) + 0.070257 * sin(i.jdpr) - 0.006758 * cos(2 * i.jdpr)' +
+          '+ 0.000907 * sin(2 * i.jdpr) - 0.002697 * cos(3 * i.jdpr) + 0.001480 * sin(3 * i.jdpr)')
+        set('cosSunZen',
+          'sin(i.latRad) * sin(i.delta) ' +
+          '+ cos(i.latRad) * cos(i.delta) * cos(i.angleHour)')
+        set('sunZen',
+          'acos(i.cosSunZen)')
+        set('sinSunAzSW',
+          toImage('cos(i.delta) * sin(i.angleHour) / sin(i.sunZen)')
+            .clamp(-1, 1))
+        set('cosSunAzSW',
+          '(-cos(i.latRad) * sin(i.delta)' +
+          '+ sin(i.latRad) * cos(i.delta) * cos(i.angleHour)) / sin(i.sunZen)')
+        set('sunAzSW',
+          'asin(i.sinSunAzSW)')
+        setIf('sunAzSW',
+          'i.cosSunAzSW <= 0',
+          '{pi} - i.sunAzSW',
+          'sunAzSW')
+        setIf('sunAzSW',
+          'i.cosSunAzSW > 0 and i.sinSunAzSW <= 0',
+          '2 * {pi} + i.sunAzSW',
+          'sunAzSW')
+        set('sunAz',
+          'i.sunAzSW + {pi}')
+        setIf('sunAz',
+          'i.sunAz > 2 * {pi}',
+          'i.sunAz - 2 * {pi}',
+          'sunAz')
+      }
+    
+      function sunZenOut() {
+        // https://nex.nasa.gov/nex/static/media/publication/HLS.v1.0.UserGuide.pdf
+        set('centerLat',
+          ee.Number(
+            ee.Geometry(image.get('system:footprint'))
+              .bounds().centroid(30).coordinates().get(0))
+            .multiply(Math.PI).divide(180))
+        set('sunZenOut',
+          '(31.0076' +
+          '- 0.1272 * i.centerLat' +
+          '+ 0.01187 * pow(i.centerLat, 2)' +
+          '+ 2.40E-05 * pow(i.centerLat, 3)' +
+          '- 9.48E-07 * pow(i.centerLat, 4)' +
+          '- 1.95E-09 * pow(i.centerLat, 5)' +
+          '+ 6.15E-11 * pow(i.centerLat, 6)) * {pi}/180')
+      }
+    
+      function rossThick(bandName, sunZen, viewZen, relativeSunViewAz) {
+        var args = {sunZen: sunZen, viewZen: viewZen, relativeSunViewAz: relativeSunViewAz}
+        cosPhaseAngle('cosPhaseAngle', sunZen, viewZen, relativeSunViewAz)
+        set('phaseAngle',
+          'acos(i.cosPhaseAngle)')
+        set(bandName,
+          '(({pi}/2 - i.phaseAngle) * i.cosPhaseAngle + sin(i.phaseAngle)) ' +
+          '/ (cos({sunZen}) + cos({viewZen})) - {pi}/4', args)
+      }
+    
+      function liThin(bandName, sunZen, viewZen, relativeSunViewAz) {
+        // From https://modis.gsfc.nasa.gov/data/atbd/atbd_mod09.pdf
+        var args = {
+          sunZen: sunZen,
+          viewZen: viewZen,
+          relativeSunViewAz: relativeSunViewAz,
+          'h/b': 2,
+        }
+    
+        anglePrime('sunZenPrime', sunZen)
+        anglePrime('viewZenPrime', viewZen)
+        cosPhaseAngle('cosPhaseAnglePrime', 'i.sunZenPrime', 'i.viewZenPrime', relativeSunViewAz)
+        set('distance',
+          'sqrt(pow(tan(i.sunZenPrime), 2) + pow(tan(i.viewZenPrime), 2)' +
+          '- 2 * tan(i.sunZenPrime) * tan(i.viewZenPrime) * cos({relativeSunViewAz}))', args)
+        set('temp',
+          '1/cos(i.sunZenPrime) + 1/cos(i.viewZenPrime)')
+        set('cosT',
+          toImage('{h/b} * sqrt(pow(i.distance, 2) + pow(tan(i.sunZenPrime) * tan(i.viewZenPrime) * sin({relativeSunViewAz}), 2))' +
+            '/ i.temp', args)
+            .clamp(-1, 1))
+        set('t', 'acos(i.cosT)')
+        set('overlap',
+          '(1/{pi}) * (i.t - sin(i.t) * i.cosT) * (i.temp)')
+        setIf('overlap', 'i.overlap > 0', 0)
+        set(bandName,
+          'i.overlap - i.temp' +
+          '+ (1/2) * (1 + i.cosPhaseAnglePrime) * (1/cos(i.sunZenPrime)) * (1/cos(i.viewZenPrime))')
+      }
+    
+      function anglePrime(name, angle) {
+        var args = {'b/r': 1, angle: angle}
+        set('tanAnglePrime',
+          '{b/r} * tan({angle})', args)
+        setIf('tanAnglePrime', 'i.tanAnglePrime < 0', 0)
+        set(name,
+          'atan(i.tanAnglePrime)')
+      }
+    
+      function cosPhaseAngle(name, sunZen, viewZen, relativeSunViewAz) {
+        var args = {
+          sunZen: sunZen,
+          viewZen: viewZen,
+          relativeSunViewAz: relativeSunViewAz
+        }
+        set(name,
+          toImage('cos({sunZen}) * cos({viewZen})' +
+            '+ sin({sunZen}) * sin({viewZen}) * cos({relativeSunViewAz})', args)
+            .clamp(-1, 1))
+      }
+    
+      function adjustBands() {
+        for (var bandName in coefficientsByBand)
+          applyCFactor(bandName, coefficientsByBand[bandName])
+      }
+    
+      function applyCFactor(bandName, coefficients) {
+        brdf('brdf', 'kvol', 'kgeo', coefficients)
+        brdf('brdf0', 'kvol0', 'kgeo0', coefficients)
+        set('cFactor',
+          'i.brdf0 / i.brdf', coefficients)
+        set(bandName,
+          '{bandName} * i.cFactor', {bandName: 'i.' + bandName})
+      }
+    
+      function brdf(bandName, kvolBand, kgeoBand, coefficients) {
+        var args = merge(coefficients, {
+          // kvol: 'i.' + kvolBand,
+          kvol: '3 * i.' + kvolBand,     // check this multiplication factor.  Is there an 'optimal' value?  Without a factor here, there is not enough correction.
+          kgeo: 'i.' + kgeoBand
+        })
+        return set(bandName,
+          '{fiso} + {fvol} * {kvol} + {fgeo} * {kvol}', args)
+      }
+    
+      function findCorners() {
+        var footprint = ee.Geometry(image.get('system:footprint'))
+        var bounds = ee.List(footprint.bounds().coordinates().get(0))
+        var coords = footprint.coordinates()
+    
+        var xs = coords.map(function (item) {
+          return x(item)
+        })
+        var ys = coords.map(function (item) {
+          return y(item)
+        })
+    
+        function findCorner(targetValue, values) {
+          var diff = values.map(function (value) {
+            return ee.Number(value).subtract(targetValue).abs()
+          })
+          var minValue = diff.reduce(ee.Reducer.min())
+          var idx = diff.indexOf(minValue)
+          return coords.get(idx)
+        }
+    
+        var lowerLeft = findCorner(x(bounds.get(0)), xs)
+        var lowerRight = findCorner(y(bounds.get(1)), ys)
+        var upperRight = findCorner(x(bounds.get(2)), xs)
+        var upperLeft = findCorner(y(bounds.get(3)), ys)
+        return {
+          upperLeft: upperLeft,
+          upperRight: upperRight,
+          lowerRight: lowerRight,
+          lowerLeft: lowerLeft
+        }
+      }
+  
+      function x(point) {
+        return ee.Number(ee.List(point).get(0))
+      }
+    
+      function y(point) {
+        return ee.Number(ee.List(point).get(1))
+      }
+    
+      function pointBetween(pointA, pointB) {
+        return ee.Geometry.LineString([pointA, pointB]).centroid().coordinates()
+      }
+    
+      function slopeBetween(pointA, pointB) {
+        return ((y(pointA)).subtract(y(pointB))).divide((x(pointA)).subtract(x(pointB)))
+      }
+    
+      function toLine(pointA, pointB) {
+        return ee.Geometry.LineString([pointA, pointB])
+      }
+
+// ************** COMMON HELPERS **************
+
+      function set(name, toAdd, args) {
+        toAdd = toImage(toAdd, args)
+        image = image.addBands(toAdd.rename(name), null, true)
+      }
+    
+      function setIf(name, condition, trueValue, falseValue) {
+        condition = toImage(condition)
+        var trueMasked = toImage(trueValue).mask(toImage(condition))
+        var falseMasked = toImage(falseValue).mask(invertMask(condition))
+        var value = trueMasked.unmask(falseMasked)
+        set(name, value)
+        
+    
+        function invertMask(mask) {
+          return mask.multiply(-1).add(1)
+        }
+      }
+    
+      function toImage(band, args) {
+        if ((typeof band) === 'string') {
+          if (band.indexOf('.') > -1 || band.indexOf(' ') > -1 || band.indexOf('{') > -1) {
+            band = image.expression(format(band, args), {i: image})
+          } else
+            band = image.select(band)
+        }
+        return ee.Image(band)
+      }
+    
+      function format(s, args) {
+        if (!args) args = {}
+        var allArgs = merge(constants, args)
+        var result = s.replace(/{([^{}]*)}/g,
+          function (a, b) {
+            var replacement = allArgs[b]
+            if (replacement == null) {
+              print('Undeclared argument: ' + b, 's: ' + s, args)
+              return null
+            }
+            return allArgs[b]
+          }
+        )
+        if (result.indexOf('{') > -1)
+          return format(result, args)
+        return result
+      }
+      
+      function merge(o1, o2) {
+        function addAll(target, toAdd) {
+          for (var key in toAdd) target[key] = toAdd[key]
+        }
+    
+        var result = {}
+        addAll(result, o1)
+        addAll(result, o2)
+        return result
+      }
+    
+      function show(band, min, max) {
+        Map.addLayer(toImage(band), {min: min ? min : -1, max: max ? max : 1}, band)
+      }
+    }
+    
+//====================================================================================================//
+//                                   end of BRDF correction for Landsat 8                             //
+//====================================================================================================//
 
 
 
 // ========== CLOUD AND CLOUD-SHADOW MASKING  =====================//
 
-// =========================== CLOUD MASKING =============== //
+// =========================== CLOUD MASKING FOR LANDSAT 8=============== //
 
 // 9. Cloud and cloud shadow masking parameters.
 // If cloudScoreTDOM is chosen
@@ -664,8 +1101,6 @@ var contractPixels = 1.5;
 // (1.5 results in a 1 pixel buffer)(0.5 results in a 0 pixel buffer)
 // (2.5 or 3.5 generally is sufficient)
 var dilatePixels = 2.5;
-
-
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -754,7 +1189,7 @@ function rescale(img, exp, thresholds) {
 //  =========================== END CLOUD MASKING ===================== //
 
 
-// =========================== CLOUD SHADOW REMOVAL =================== //
+// =========================== CLOUD SHADOW REMOVAL FOR LANDSAT 8 =================== //
 // zScoreThresh: Threshold for cloud shadow masking- lower number masks out 
 //    less. Between -0.8 and -1.2 generally works well
 var zScoreThresh = -1;
@@ -806,8 +1241,75 @@ exports.shadowMask = function(collection,studyArea,zScoreThresh,shadowSumThresh,
   return collection;
 };
 
-// =========================== END CLOUD SHADOW REMOVAL =============== //
+// =========================== END CLOUD SHADOW REMOVAL FOR LANDSAT 8 =============== //
 
+//************************************************************************************
+//                              CLOUD AND SHADOW MASKING FOR SENTINEL 2             **
+//'***********************************************************************************
+
+// Join two collections on their 'system:index' property.
+// The propertyName parameter is the name of the property
+// that references the joined image.
+function indexJoin(collectionA, collectionB, propertyName) {
+  var joined = ee.ImageCollection(ee.Join.saveFirst(propertyName).apply({
+    primary: collectionA,
+    secondary: collectionB,
+    condition: ee.Filter.equals({
+      leftField: 'system:index',
+      rightField: 'system:index'})
+  }));
+  // Merge the bands of the joined image.
+  return joined.map(function(image) {
+    return image.addBands(ee.Image(image.get(propertyName)));
+  });
+}
+
+// Aggressively mask clouds and shadows.
+function maskImage(image) {
+  // Compute the cloud displacement index from the L1C bands.
+  var cdi = ee.Algorithms.Sentinel2.CDI(image);
+  var s2c = image.select('probability');
+  var cirrus = image.select('B10').multiply(0.0001);
+
+  // Assume low-to-mid atmospheric clouds to be pixels where probability
+  // is greater than 65%, and CDI is less than -0.5. For higher atmosphere
+  // cirrus clouds, assume the cirrus band is greater than 0.01.
+  // The final cloud mask is one or both of these conditions.
+  var isCloud = s2c.gt(65).and(cdi.lt(-0.5)).or(cirrus.gt(0.01));
+
+  // Reproject is required to perform spatial operations at 20m scale.
+  // 20m scale is for speed, and assumes clouds don't require 10m precision.
+  isCloud = isCloud.focal_min(3).focal_max(16);
+  isCloud = isCloud.reproject({crs: cdi.projection(), scale: 20});
+
+  // Project shadows from clouds we found in the last step. This assumes we're working in
+  // a UTM projection.
+  var shadowAzimuth = ee.Number(90)
+      .subtract(ee.Number(image.get('MEAN_SOLAR_AZIMUTH_ANGLE')));
+
+  // With the following reproject, the shadows are projected 5km.
+  isCloud = isCloud.directionalDistanceTransform(shadowAzimuth, 50);
+  isCloud = isCloud.reproject({crs: cdi.projection(), scale: 100});
+
+  isCloud = isCloud.select('distance').mask();
+  return image.select('B2', 'B3', 'B4').updateMask(isCloud.not());
+}
+
+// Join the cloud probability dataset to surface reflectance.
+//var withCloudProbability = indexJoin(s2Sr, s2c, 'cloud_probability');
+// Join the L1C data to get the bands needed for CDI.
+//var withS2L1C = indexJoin(withCloudProbability, s2, 'l1c');
+
+// Map the cloud masking function over the joined collection.
+//var masked = ee.ImageCollection(withS2L1C.map(maskImage));
+
+// Take the median, specifying a tileScale to avoid memory errors.
+//var median = masked.reduce(ee.Reducer.median(), 8);
+
+
+//************************************************************************************
+//                      END OF CLOUD AND SHADOW MASKING FOR SENTINEL 2             **
+//'***********************************************************************************
 
 // TERRAIN CORRECTION
 
@@ -929,6 +1431,106 @@ exports.terrainCorrection = function(collection) {
 // ==================================== END OF TERRAIN CORRECTION ===================== //
 
 
+//**************************************************************************************
+//                START OF SPECKLE FILTER FOR SENTINEL 1 USING GAMMA MAP                //
+//**************************************************************************************
+//https://code.earthengine.google.com/b4f8cd4e8126cfb3f22c0ceafeb6395f
+// GammaMap Speckle Filter conform (MODIFIED)
+
+
+function toDB(image) { return image.log10().multiply(10.0); }
+
+function GammaMap(image, enl, ksize) {
+  // Cf. https://github.com/senbox-org/s1tbx/blob/master/s1tbx-op-sar-processing/src/main/java/org/esa/s1tbx/sar/gpf/filtering/SpeckleFilters/GammaMap.java
+  // which implements Lopes et al, IGARSS 1990, 2409-2412.
+  // See: https://www.researchgate.net/publication/224270891_Maximum_A_Posteriori_Speckle_Filtering_And_First_Order_Texture_Models_In_Sar_Images.
+  // This is the equivalent of the getGammaMapValue() method
+  
+  // Convert image from dB to natural values
+  var nat_img = ee.Image(10.0).pow(image.divide(10.0));
+
+  // Square kernel, ksize should be odd (typically 3, 5 or 7)
+  var weights = ee.List.repeat(ee.List.repeat(1,ksize),ksize);
+  
+  // ~~(ksize/2) does integer division in JavaScript
+  var kernel = ee.Kernel.fixed(ksize,ksize, weights, ~~(ksize/2), ~~(ksize/2), false);
+
+  // Get mean and variance
+  var mean = nat_img.reduceNeighborhood(ee.Reducer.mean(), kernel);
+  var variance = nat_img.reduceNeighborhood(ee.Reducer.variance(), kernel);
+
+  // "Pure speckle" threshold
+  var ci = variance.sqrt().divide(mean);  // square root of inverse of enl
+
+  // If ci <= cu, the kernel lies in a "pure speckle" area -> return simple mean
+  var cu = 1.0/Math.sqrt(enl)
+  
+  // If cu < ci < cmax the kernel lies in the low textured speckle area -> return the filtered value
+  var cmax = Math.sqrt(2.0) * cu
+
+  var alpha = ee.Image(1.0 + cu*cu).divide(ci.multiply(ci).subtract(cu*cu));
+  var b = alpha.subtract(enl + 1.0)
+  var d = mean.multiply(mean).multiply(b).multiply(b).add(alpha.multiply(mean).multiply(nat_img).multiply(4.0*enl));
+  var f = b.multiply(mean).add(d.sqrt()).divide(alpha.multiply(2.0));
+  
+  // If ci > cmax do not filter at all (i.e. we don't do anything, other then masking)
+  
+  // Compose a 3 band image with the mean filtered "pure speckle", the "low textured" filtered and the unfiltered portions
+  return toDB(mean.updateMask(ci.lte(cu))).addBands(toDB(f.updateMask(ci.gt(cu)).updateMask(ci.lt(cmax)))).addBands(image.updateMask(ci.gte(cmax)));
+}
+
+var geometry = geometry; // Center around the CZ city of geometry
+
+var collection = ee.ImageCollection('COPERNICUS/S1_GRD')
+                  .filterMetadata('instrumentMode', 'equals', 'IW')
+                  // .filter(ee.Filter.eq('transmitterReceiverPolarisation', 'VV'))
+                  .select(['VH', 'angle'])
+                  .filterBounds(geometry);
+
+// Get some selections for a nice time stack
+var img1 = ee.Image(collection.select(0).filterDate('2020-04-26', '2020-04-29').first());
+// var img2 = ee.Image(collection.select(0).filterDate('2015-05-01', '2015-05-31').first());
+// var img3 = ee.Image(collection.select(0).filterDate('2015-06-01', '2015-06-30').first());
+
+//Map.centerObject(geometry, 14);  // Zoom level 14 gets the 10m pixel spacing. Note how speckle filtering "blurs" lower resolution layers.
+
+// GMAP filter each of the selected images. 
+// ENL = 4.9 for IW GRD Full Resolution with 10x10 m spacing
+// See: https://sentinel.esa.int/web/sentinel/user-guides/sentinel-1-sar/resolutions/level-1-ground-range-detected
+
+var gmap1 = GammaMap(img1, 4.4, 7);
+// var gmap2 = GammaMap(img2, 5, 7);
+// var gmap3 = GammaMap(img3, 5, 7);
+
+// // Here are some example visualizations:
+// // Display partial filtering results separately
+// Map.addLayer(gmap1.select(0), {min:-25, max:0}, 'Mean Filtered', false);
+// Map.addLayer(gmap1.select(1), {min:-25, max:0}, 'GMAP Filtered', false);
+// Map.addLayer(gmap1.select(2), {min:-25, max:0}, 'Unfiltered', false);
+// // And assembled into one image:
+ //Map.addLayer(gmap1.reduce(ee.Reducer.sum()), {min:-25, max:0}, 'GM_Composed');
+// Map.addLayer(image.select('b1'), {min:-25, max:0, bands:['b1']}, 'GM_SNAP_GEE_Like');
+
+
+//var diff = gmap1.reduce(ee.Reducer.sum()).subtract(image.select('b1'))
+
+//print('mean', diff.reduceRegion(ee.Reducer.mean(), geometry, 10).values())
+//print('min', diff.reduceRegion(ee.Reducer.min(), geometry, 10).values())
+//print('max', diff.reduceRegion(ee.Reducer.max(), geometry, 10).values())
+
+// // Show the time stack as a composition
+// Map.addLayer(img1.select(0).addBands(img2.select(0)).addBands(img3.select(0)), {min:-25, max:0}, 'Original time series', false);
+// // idem, for GMAP filtered version
+// Map.addLayer(gmap1.reduce(ee.Reducer.sum()).addBands(gmap2.reduce(ee.Reducer.sum())).addBands(gmap3.reduce(ee.Reducer.sum())), {min:-25, max:0}, 'GMAP filtered time series', false);
+// Van Gogh would have loved this!
+
+//**************************************************************************************
+//                END OF SPECKLE FILTER FOR SENTINEL 1 USING GAMMA MAP                //
+//**************************************************************************************
+
+
+
+
 // ************************************************ //
 // NORMALIZE ALL THE COVARIATES AND BANDS  (come back later)         //
 //************************************************* //
@@ -971,7 +1573,7 @@ function normalize(image){
 
 
 // *****************************************************************//
-//                      spectral indices
+//  just the list of spectral indices for all 4 types of imageries //
 //*****************************************************************
 //Example using image.expression()
 
@@ -992,10 +1594,13 @@ Map.addLayer(evi, {min: -1, max: 1, palette: ['a6611a', 'f5f5f5', '4dac26']});
 */
 
 //===========  Indices that i will include  ==============
-/*
+
 // ========= 
 // for sentinel-2 and landsat-8
 //============
+/*
+
+// Landsat 8 = compositel8
 
 var NBR = image.expression(
     '(NIR - SWIR)/(NIR + SWIR)', {
@@ -1066,65 +1671,236 @@ var MBSI = image.expression(
 // for sentinel-1 
 //============
 
+var mRFDI = image.expression(
+    '((VV - VH) / (VV + VH))', {
+      'VV': image.select('S1_VV_mean'),
+      'VH': image.select('S1_VH_mean')
+});
+
+
+var DPSVI = image.expression(
+    '((VV + VH) / VV)', {
+      'VV': image.select('S1_VV_mean'),
+      'VH': image.select('S1_VH_mean')
+});
+
 
 // ========= 
 // for PALSAR 
 //============
-*/
 
+HVdB
+
+*/
 // *****************************************************************//
-//                      add several spectral indices over image collections
+//        END OF THE SPECTRAL INDICES LISTING
 //*****************************************************************
 
+//===================================================================//
+//                  SPECTRAL INDICES DEVELOPED                       //
+//===================================================================//
 
-/// generate Sentine-1 average of VH and VV polarization data for 2020.
-// Sentinel-1 is from the European Space Agency (ESA) and operates at C-band in VV and VH polarization.
-// VH or HV are more sensitive to volume and plants.  VV is about roughness such as surface waves on water.
-var pol = 'VH';
-var pol2 = 'VV';
+//                       LANDSAT 8 INDICES                          //
+var NBRl8 = compositel8.expression(
+    '(NIR - SWIR)/(NIR + SWIR)', {
+      'NIR': compositel8.select('B5'),
+      'RED': compositel8.select('B4'),
+      'SWIR': compositel8.select('B6')
+    });
 
-// Define resolution, will also be used to define the output resolution\
-// The possible resolutions are 10, 25, or 40 meters
-var res = 10;
+var MSWIl8 = compositel8.expression(
+    '(1-NIR)/((NIR + SWIR) * (NIR - RED) * 100)', {
+      'NIR': compositel8.select('B5'),
+      'RED': compositel8.select('B4'),
+      'SWIR': compositel8.select('B6')
+});
 
-var collectionVH = ee.ImageCollection('COPERNICUS/S1_GRD')
-   .filterBounds(SK)
-   .filterDate(startDate, endDate)
-   .select(pol);
+var NDSIl8 = compositel8.expression(
+    '(SWIR2 - BLUE)/(SWIR2 + BLUE)', {
+      'BLUE': compositel8.select('B2'),
+      'SWIR2': compositel8.select('B7') //CHANGE TO B11 FOR s2
+});
 
-var collectionVV = ee.ImageCollection('COPERNICUS/S1_GRD')
-   .filterBounds(SK)
-   .filterDate(startDate, endDate)
-   .select(pol2);
+var NDWIl8 = compositel8.expression(
+    '(GREEN - NIR)/(GREEN + NIR)', {
+      'GREEN': compositel8.select('B3'),
+      'NIR': compositel8.select('B5') //CHANGE TO B8 FOR s2
+});
 
-//Compute the mean of the Sentinel-1 data collection over the period specfied above by start and end. 
-//Then rename that band as 's1vh' so we can call and access it directly later
-var S1_VH_mean = collectionVH.reduce(ee.Reducer.mean()).rename('s1vh');
-var S1_VV_mean = collectionVV.reduce(ee.Reducer.mean()).rename('s1vv');
+var BIal8 = compositel8.expression(
+    'sqrt((RED)**2 + (GREEN)**2 + (NIR)**2)',{
+      'GREEN': compositel8.select('B3'),
+      'NIR': compositel8.select('B5'), //CHANGE TO B5 FOR L8
+      'RED': compositel8.select('B4')  
+});
 
-var s1Vis = {
-  min: -20,
-  max: -5,
+var BIbl8 = compositel8.expression(
+    'sqrt((RED)**2 + (GREEN)**2)',{
+      'GREEN': compositel8.select('B3'),
+      'RED': compositel8.select('B4')  
+});
+
+var NDBIl8 = compositel8.expression(
+    '(SWIR2 - NIR)/(SWIR2 + NIR)', {
+      'SWIR2': compositel8.select('B7'), //CHANGE TO B7 FOR L8
+      'NIR': compositel8.select('B5') 
+});
+
+var BSIl8 = compositel8.expression(
+    '((SWIR2 + RED) - (SWIR2 + BLUE))/((SWIR2 + RED) + (SWIR2 + BLUE))', {
+      'SWIR2': compositel8.select('B7'), //CHANGE TO B7 FOR L8
+      'RED': compositel8.select('B4'),
+      'BLUE': compositel8.select('B2')
+});
+
+
+var MSAVIl8 = compositel8.expression(
+    '(2 * NIR + 1 - sqrt (((2 * NIR + 1)**2) - 8 * (NIR - RED)))', {
+      'RED': compositel8.select('B4'),
+      'NIR': compositel8.select('B5') //CHANGE TO B8 for S2
+});
+
+var MBSIl8 = compositel8.expression(
+    '((RED - GREEN)*2)/((RED + GREEN)-2)', {
+      'RED': compositel8.select('B4'), //CHANGE TO B4 FOR L8
+      'GREEN': compositel8.select('B3') 
+});
+
+
+
+//                       Sentinel 2 INDICES                          //
+var NBRs2 = s2composite.expression(
+    '(NIR - SWIR)/(NIR + SWIR)', {
+      'NIR': s2composite.select('sB8'),
+      'RED': s2composite.select('sB4'),
+      'SWIR': s2composite.select('sB11')
+    });
+
+var MSWIs2 = s2composite.expression(
+    '(1-NIR)/((NIR + SWIR) * (NIR - RED) * 100)', {
+      'NIR': s2composite.select('sB8'),
+      'RED': s2composite.select('sB4'),
+      'SWIR': s2composite.select('sB11')
+});
+
+var NDSIs2 = s2composite.expression(
+    '(SWIR2 - BLUE)/(SWIR2 + BLUE)', {
+      'BLUE': s2composite.select('sB2'),
+      'SWIR2': s2composite.select('sB12') //CHANGE TO B11 FOR s2
+});
+
+var NDWIs2 = s2composite.expression(
+    '(GREEN - NIR)/(GREEN + NIR)', {
+      'GREEN': s2composite.select('sB3'),
+      'NIR': s2composite.select('sB8') //CHANGE TO B8 FOR s2
+});
+
+var Bias2 = s2composite.expression(
+    'sqrt((RED)**2 + (GREEN)**2 + (NIR)**2)',{
+      'GREEN': s2composite.select('sB3'),
+      'NIR': s2composite.select('sB8'), //CHANGE TO B5 FOR L8
+      'RED': s2composite.select('sB4')  
+});
+
+var Bibs2 = s2composite.expression(
+    'sqrt((RED)**2 + (GREEN)**2)',{
+      'GREEN': s2composite.select('sB3'),
+      'RED': s2composite.select('sB4')  
+});
+
+var NDBIs2 = s2composite.expression(
+    '(SWIR2 - NIR)/(SWIR2 + NIR)', {
+      'SWIR2': s2composite.select('sB12'), //CHANGE TO B7 FOR L8
+      'NIR': s2composite.select('sB8') 
+});
+
+var BSIs2 = s2composite.expression(
+    '((SWIR2 + RED) - (SWIR2 + BLUE))/((SWIR2 + RED) + (SWIR2 + BLUE))', {
+      'SWIR2': s2composite.select('sB12'), //CHANGE TO B7 FOR L8
+      'RED': s2composite.select('sB4'),
+      'BLUE': s2composite.select('sB2')
+});
+
+
+var MSAVIs2 = s2composite.expression(
+    '(2 * NIR + 1 - sqrt (((2 * NIR + 1)**2) - 8 * (NIR - RED)))', {
+      'RED': s2composite.select('sB4'),
+      'NIR': s2composite.select('sB8') //CHANGE TO B8 for S2
+});
+
+var MBSIs2 = s2composite.expression(
+    '((RED - GREEN)*2)/((RED + GREEN)-2)', {
+      'RED': s2composite.select('sB4'), //CHANGE TO B4 FOR L8
+      'GREEN': s2composite.select('sB3') 
+});
+
+//                       Sentinel 1 INDICES                          //
+
+var mRFDI = s1composite.expression(
+    '((VV - VH) / (VV + VH))', {
+      'VV': s1composite.select('s1vv'),
+      'VH': s1composite.select('s1vh')
+});
+
+
+var DPSVI = s1composite.expression(
+    '((VV + VH) / VV)', {
+      'VV': s1composite.select('s1vv'),
+      'VH': s1composite.select('s1vh')
+});
+
+
+// visualization for Indices
+// var ndParams = {min: -1, max: 1, palette: ['blue', 'white', 'green']};
+// Map.addLayer(NDWIl8, ndParams, 'Landsat8 NDWI')
+// Map.addLayer(NBRl8, ndParams, 'Landsat8 NBR')
+
+// ========================================//
+// IN THIS PART I AM TRYING TO MAKE A FUNCION FOR MAKIN THE INDICES//
+//=================================================//
+
+/*/////// this is for SENTINEL 2
+var bands = ['sB2', 'sB3', 'sB4', 'sB8', 'sB11', 'sB12'];
+var bandSelections = {};
+
+var indices = [  { name: 'NBRs2', expression: '(NIR - SWIR)/(NIR + SWIR)' },  
+{ name: 'MSWIs2', expression: '(1-NIR)/((NIR + SWIR) * (NIR - RED) * 100)' },  
+{ name: 'NDSIs2', expression: '(SWIR2 - BLUE)/(SWIR2 + BLUE)' },  
+{ name: 'NDWIs2', expression: '(GREEN - NIR)/(GREEN + NIR)' },  
+{ name: 'Bias2', expression: 'sqrt((RED)**2 + (GREEN)**2 + (NIR)**2)' },  
+{ name: 'Bibs2', expression: 'sqrt((RED)**2 + (GREEN)**2)' },  
+{ name: 'NDBIs2', expression: '(SWIR2 - NIR)/(SWIR2 + NIR)' },  
+{ name: 'BSIs2', expression: '((SWIR2 + RED) - (SWIR2 + BLUE))/((SWIR2 + RED) + (SWIR2 + BLUE))' },  
+{ name: 'MSAVIs2', expression: '(2 * NIR + 1 - sqrt (((2 * NIR + 1)**2) - 8 * (NIR - RED)))' },  
+{ name: 'MBSIs2', expression: '((RED - GREEN)*2)/((RED + GREEN)-2)' },];
+
+var bandLookup = {
+  'NIR': s2composite.select('sB8'),
+  'RED': s2composite.select('sB4'),
+  'SWIR': s2composite.select('sB11'),
+  'BLUE': s2composite.select('sB2'),
+  'GREEN': s2composite.select('sB3'),
+  'SWIR2': s2composite.select('sB12'),
 };
 
-S1_VH_mean = S1_VH_mean.clip(SK);
-S1_VV_mean = S1_VV_mean.clip(SK);
+for (var i = 0; i < indices.length; i++) {
+  var index = indices[i];
+  var expression = index.expression;
+  for (var band in bandLookup) {
+    expression = expression.replace(new RegExp(band, 'g'), bandLookup[band].expression);
+  }
+  var result = s2composite.expression(expression);
+  eval(index.name + ' = result');
+}
+*/
 
 
 
-//The Map.addLayer simply displays the image with the visualization parameters specfied above and inserted in command below.
-// Let's called that displayed image as 'Sentinel-1 VH'
-Map.addLayer(S1_VH_mean, s1Vis, 'Sentinel-1 VH');
-Map.addLayer(S1_VV_mean, s1Vis, 'Sentinel-1 VV');
+//=====================================================================//
+//                 END OF THE SPECTRAL INDICES                         //
+//=====================================================================//
 
 
-// Use these bands for prediction.
-//var bands = ['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11','s1vh', 's1vv', 'sB3','sB4','sB5'];  
-
-//  Now add that Sentinel-1 mean backscksatter to the stack of Landsat bands with the following command:
-var allimages = compositel8.addBands(S1_VH_mean);
-var allimages = allimages.addBands(S1_VV_mean);
-var allimages = allimages.addBands(s2composite);
 
 ////checking the name of band names again
 print(allimages.bandNames());
@@ -1133,7 +1909,7 @@ print(allimages.bandNames());
 /////////////////////// Now, lets' add ALOS/PALSAR mosaics from JAXA. ///////////////////////////////////////////////
 //////////// These are produced every year by JAXA. This is L-band data at HV and HH ////
 
-var alos = ee.Image('JAXA/ALOS/PALSAR/YEARLY/SAR/2017');
+var alos = ee.Image('JAXA/ALOS/PALSAR/YEARLY/SAR/2019');
 
 //  compute the HV/HH ratio and add as new Band
 var hvhh = alos.expression(
@@ -1145,7 +1921,7 @@ var hvhh = alos.expression(
 var alos = alos.addBands(hvhh);
 
 // apply: γ₀ = 10log₁₀(DN²) - 83.0 dB
-var DN = alos.select('HH');
+var DN = alos.select('HV');
 var HVdB = DN.pow(2).log10().multiply(10).subtract(83);
 HVdB = HVdB.rename(['HV'])  /// naming that band 'HV' for calling later
 
@@ -1162,32 +1938,225 @@ var palsarVis = {
 };
 
 
+
+
 Map.addLayer(HVdB, palsarVis, 'Palsar');
+
 
 //  Now add that ALOS band
 var allimages = allimages.addBands(HVdB);
 
+// apply: γ₀ = 10log₁₀(DN²) - 83.0 dB
+var DNHH = alos.select('HH');
+var HHdB = DNHH.pow(2).log10().multiply(10).subtract(83);
+HHdB = HHdB.rename(['HH']);  /// naming that band 'HH' for calling later
+
+var alosHHVis = {
+  min: -20,
+  max: -5,
+};
+HHdB = HHdB.clip(SK);
+
+var palsarVis = {
+  min: -20,
+  max: -5,
+};
+
+
+
+//======================//
+// ADD ALL THE IMAGES USING FOR LOOP
+//======================//
+/*// Array of all indices for L8
+var l8Indices = [MSWIl8, NDSIl8, NDWIl8, BIal8, BIbl8, NDBIl8, BSIl8, MSAVIl8, MBSIl8, NBRl8];
+// Array of all indices for S2
+var s2Indices = [MSWIs2, NDSIs2, NDWIs2, Bias2, Bibs2, NDBIs2, BSIss2, MSAVIs2, MBSIs2, NBRs2];
+// Array of all indices for S1
+var s1Indices = [mRFDI, DPSVI];
+// Add all L8 indices
+for (var i = 0; i < l8Indices.length; i++) {
+allimages = allimages.addBands(l8Indices[i]);
+}
+// Add all S2 indices
+for (var i = 0; i < s2Indices.length; i++) {
+allimages = allimages.addBands(s2Indices[i]);
+}
+// Add all S1 indices
+for (var i = 0; i < s1Indices.length; i++) {
+allimages = allimages.addBands(s1Indices[i]);
+}
+ */
+ 
+ //  Now add that all L8 the indices here
+var allimages = allimages.addBands(MSWIl8);
+var allimages = allimages.addBands(NDSIl8);
+var allimages = allimages.addBands(NDWIl8);
+var allimages = allimages.addBands(BIal8);
+var allimages = allimages.addBands(BIbl8);
+var allimages = allimages.addBands(NDBIl8);
+var allimages = allimages.addBands(BSIl8);
+var allimages = allimages.addBands(MSAVIl8);
+var allimages = allimages.addBands(MBSIl8);
+var allimages = allimages.addBands(NBRl8);
+
+ //  Now add that all s2 the indices here
+var allimages = allimages.addBands(MSWIs2);
+var allimages = allimages.addBands(NDSIs2);
+var allimages = allimages.addBands(NDWIs2);
+var allimages = allimages.addBands(Bias2);
+var allimages = allimages.addBands(Bibs2);
+var allimages = allimages.addBands(NDBIs2);
+var allimages = allimages.addBands(BSIs2);
+var allimages = allimages.addBands(MSAVIs2);
+var allimages = allimages.addBands(MBSIs2);
+var allimages = allimages.addBands(NBRs2);
+
+ //  Now add that all s1 the indices here
+var allimages = allimages.addBands(mRFDI);
+var allimages = allimages.addBands(DPSVI);
 
 ////checking the name of band names again
 print(allimages.bandNames());
 
-var bands = ['HV','B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11','s1vh', 's1vv', 'sB3','sB4','sB5'];
+var bands = ['B1', 'HV','B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11','s1vh', 's1vv', 'sB3','sB4','sB5', 'constant',
+'B7_1','B3_1','B4_1', 'B4_2','B7_2', 'B7_3','constant_1', 'B4_3', 'B5_1','constant_2', 'sB12_1', 'sB3_1', 'sB12_2',
+'sB12_3', 'constant_3', 'sB4_3', 'sB8_1', 's1vv_1', 's1vv_2' ];
 
+// var bands = ['B1', 'HV','B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11','s1vh', 's1vv', 'sB3','sB4','sB5', 'MSWIl8',
+// 'NDSIl8','NDWIl8','BIal8', 'BIbl8','NDBIl8', 'BSIl8','MSAVIl8', 'MBSIl8'];
+
+////checking the name of band names again
+print(allimages.bandNames());
+
+
+
+//***************************************
+// start of the RF classification 
+/*************************************
+
+
+
+// THIS IS THE NORMAL DEFAULT WAY OF CLASSIFICATION
 // Overlay the  on the imagery to get training data. That is the value of each band in the variable 'bands' above are
 var training = allimages.select(bands).sampleRegions({
   collection: classNames,  ///set this equal to the training data you wish to use mygeeclasses or mygee or what ever else you have defined.
   properties: ['landcover'],
-  scale: 20
+  scale: 30
 });
 //print('landcover',training);
 
-// Train a CART classifier with the above training data, labels and the bands. You can see the values for each training pixel
+
+// Extract the values of all bands at the point
+var bandValues = allimages.reduceRegion(ee.Reducer.first(), point, 30);
+print(bandValues);
+
+
+// Train a RF classifier with the above training data, 
+//labels and the bands. You can see the values for each training pixel
 // in the 'Console' window on the right because it was printed in the line above.
-var trained = ee.Classifier.smileCart().train(training, 'landcover', bands);
+var trained = ee.Classifier.smileRandomForest(10).train(training, 'landcover', bands);
 
 // Classify the image with the same bands used for training. 'tained' is the actual decision tree model and can be applied to the
 // entire image
 var classified = allimages.select(bands).classify(trained);  //'classified' is my new classification map
+
+
+
+
+// ============== add spectral filtering to the classification ===========//
+
+// Overlay the sample data on the imagery to get training data. 
+/*var training = allimages.select(bands).sampleRegions({
+  collection: classNames,  //set this equal to the training data you wish to use mygeeclasses or mygee or what ever else you have defined.
+  properties: ['landcover'],
+  scale: 30
+});
+
+// Train a RF classifier with the training data
+var trained = ee.Classifier.smileRandomForest(10).train(training, 'landcover', bands);
+
+// Classify the image with the same bands used for training. 
+var classified = allimages.select(bands).classify(trained);  //'classified' is your new classification map
+
+// Define the threshold for spectral thresholding
+var threshold = 0.5;
+
+// Apply the threshold to the classified image
+var thresholded = classified.expression("b1 >= threshold ? b1 : 0", {b1: classified, threshold: threshold});
+*/
+
+
+
+
+//********************************************************//
+// Adding spectral and texture filtering to the classsification //
+//           Hope it works! please GOD.                        //
+//*************************************************************/
+var classNameDict = ee.Dictionary({
+0: "ASGM",
+1: "Forest",
+2: "nonforestVeg",
+3: "settlements",
+4: "baresoil",
+5: "waterbody"
+});
+
+// Overlay the sample data on the imagery to get training data.
+var training = allimages.select(bands).sampleRegions({
+collection: classNames, //set this equal to the training data you wish to use mygeeclasses or mygee or what ever else you have defined.
+properties: ['landcover'],
+scale: 30
+});
+
+// Train a RF classifier with the training data
+var trained = ee.Classifier.smileRandomForest(10).train(training, 'landcover', bands);
+
+// Classify the image with the same bands used for training.
+var classified = allimages.select(bands).classify(trained); //'classified' is your new classification map
+
+// Define the threshold for spectral thresholding
+var threshold = 0.5;
+
+// Apply the threshold to the classified image
+var thresholded = classified.expression("b1 >= threshold ? b1 : 0", {b1: classified, threshold: threshold});
+
+// Apply texture analysis
+var texture = allimages.select(bands).reduceNeighborhood({
+reducer: ee.Reducer.stdDev(),
+kernel: ee.Kernel.square(5)
+});
+
+// Combine the classified image and the texture image
+var combined = thresholded.addBands(texture).rename(["classification", "texture"]);
+
+// Train a new classifier on the combined image
+var combinedTrained = ee.Classifier.smileRandomForest(10).train(combined, "classification", ["classification", "texture"]);
+
+// Classify the combined image with the new classifier
+var combinedClassified = combined.classify(combinedTrained);
+
+// Get the class ID for the classified image
+var finalClassification = combinedClassified.expression("b1 >= 0 ? b1 : 0", {b1: combinedClassified});
+
+// Convert class ID to class name
+var classNamesList = classNameDict.keys().getInfo();
+var finalClassificationWithNames = finalClassification.remap(classNameDict, classNamesList);
+// Set the color palette for visualization
+var mypalette=[  'red', // ASGM
+  'black', // Forest
+  'blue', //  nonforestVeg
+  'green',  // settlements
+  'yellow', // baresoil
+  'cyan', //waterbody
+];
+
+// Display the final classified image with class names
+Map.addLayer(finalClassificationWithNames, {palette: mypalette, min: 0, max: 5}, "final classification");
+
+
+//==============================================================================//
+//                              END OF THE FILTERING                           //
+//==============================================================================//
 
 // Display the inputs and the results.
 
@@ -1202,6 +2171,9 @@ var mypalette=[  'red', // ASGM
  
 ];
 
+Map.addLayer(thresholded, {min: 0, max: 1, palette: ['blue', 'red']}, 'Thresholded Image');
+Map.addLayer(combinedClassified, {min: 0, max: 1, palette: ['blue', 'red']}, 'Combined Classified Image');
+             
 Map.addLayer(classified, //displaying the classification map
              {min: 0, max: 6, palette: mypalette},  // using my choice of color for each class
              'Classification'); // call this layer 'classification
@@ -1210,6 +2182,9 @@ Map.addLayer(classified, //displaying the classification map
 //add all the necessary polygon for this
 Map.addLayer(MineKal, {}, "Mines in Kalimantan");
 
+//***************************************
+// End of the RF classification 
+//**************************************
 
 
 //************************************************************************** 
@@ -1225,7 +2200,7 @@ var classNamesTest = TASGM.merge(TForest).merge(TnonforestVeg).merge(Tsettlement
 var test = classified.sampleRegions({
   collection: classNamesTest,
   properties: ['landcover'],
-  scale: 20,
+  scale: 30,
 });
 
 var testConfusionMatrix = test.errorMatrix('landcover', 'classification')
@@ -1241,17 +2216,39 @@ print('Test Accuracy', testConfusionMatrix.accuracy());
 //===========================================================================//
 
 
-// Just try to export this to GoogleDrive
-// Export.image.toDrive({
-//   image: classified,
-//   description: 'classify_220926',
-//   crs: 'EPSG:3857',
-//   fileFormat: 'GeoTIFF',
-//   maxPixels: 1e9,
-//   formatOptions: {
-//     cloudOptimized:true
-//   }
-// });
+//****************************************************************************
+// Exporting the results to GoogleDrive
+Export.image.toDrive({
+  image: classified,
+  description: 'classify_221205',
+  crs: 'EPSG:3857',
+  fileFormat: 'GeoTIFF',
+  folder: 'CLASSIFICATIONRESULTS_GEE_2022',
+  maxPixels: 1e10,
+  scale: 10,
+  region:SouthKalimantan,
+  formatOptions: {
+    cloudOptimized:true
+  }
+});
+
+
+//exprting the confusion matrix
+var fc = ee.FeatureCollection([
+  ee.Feature(null, {
+    'accuracy': testConfusionMatrix.accuracy(),
+    'matrix': testConfusionMatrix.array()
+  })
+  ]);
+print(fc); 
+Export.table.toDrive({
+  collection: fc,
+  description: 'Accuracy_Export',
+  folder: 'CLASSIFICATIONRESULTS_GEE_2022',
+  fileNamePrefix: 'accuracy',
+  fileFormat: 'CSV'
+});
+
 
 //************************************************************************** 
 // Post-processing (COME BACK HERE AGAIN LATER!)
@@ -1264,7 +2261,69 @@ print('Test Accuracy', testConfusionMatrix.accuracy());
 // Can i try to iterate the classification process
 
 
+
+// PA in Borneo
+// THis is a regional PA in Borneo created by Salim 2015 (https://www.arcgis.com/home/item.html?id=a6e0ef26d0014c1c9d6c9374a58d7049)
 var PABorneo = ee.FeatureCollection(PABorneo);
 Map.addLayer(PABorneo, {}, "PA in Borneo");
 
-// PA in Borneio 
+//*******************************************************************
+// DEVELOP THE CODE LATER BY TRYING TO REITERATE THE TRAINING PROCESS
+// AND PRODUCE THE 
+
+// Testing the 
+// should i just build the model as a binary?
+
+
+
+
+// ***************************************
+// Here i am trying to HYPERPARAMETER TUNING THE RANDOM FOREST
+//****************************************
+
+//var bands2 = ['B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11','s1vh', 's1vv', 'sB3','sB4','sB5'];
+
+//var numTreeList = ee.List.sequence(10, 150, 10); 
+
+//var accuracies =  numTreeList.map(function(numTrees) {
+  //var classifierRF = ee.Classifier.smileRandomForest(numTrees).train(training, 'landcover', allimages.bandNames());
+      
+  // here i am classifying a table instead of an image to picture the result into graph
+  //return test.classify(classifierRF).errorMatrix('landcover', 'classification').accuracy();
+//});
+
+// //var chart = ui.Chart.array.values({
+//   array: ee.Array(accuracies),
+//   axis: 0,
+//   xLabels: numTreeList
+//   }).setOptions({
+//       title: 'Hyperparameter Tuning for the numberOfTrees Parameters',
+//       vAxis: {title: 'Validation Accuracy'},
+//       hAxis: {title: 'Number of Tress', gridlines: {count: 15}}
+//   });
+//print(chart);
+
+//******************************************************************
+// End of the hyperparameter tuning
+//******************************************************************
+
+
+// Questions i need to ask Stuart
+// 1. what is the acceptable level of false positive/ false negative / overal error acceptable for small-scale distubances
+// 2. Is it better to have polygon or points as training or test dataset?
+// 3. is there any unnecessary post-processing method that is needed for some types of data used in the model 
+// 4. is it better to just map binary ASGM/non-ASGM
+// 5. is PCA a better ofpiton to reduce the processing power needed
+
+
+// optimize the cod by dicing the data
+
+// im not sure how to refactore this
+
+Map.addLayer(ASGMhotspot, {}, "ASGM hotspots");
+
+
+
+
+
+
