@@ -1,6 +1,7 @@
-//Feature-level multispectral and radar data fusion to map ASM
-//Written in GEE (JavaScript)
-//Author: ILYAS NURSAMSI
+// THIS SCRIPT IS WRITTEN TO MAP ASGM FOR THE WHOLE KALIMANTAN ISLAND
+
+
+
 
 // center the map
 Map.centerObject(geometry);
@@ -15,6 +16,12 @@ Map.centerObject(geometry);
 var SK = ee.FeatureCollection(SouthKalimantan);
 Map.addLayer(SK, {}, "South Kalimantan");
 
+//Werner mining location data in Kalimantan Island. 
+var WerMine = ee.FeatureCollection(WernerMining);
+Map.addLayer(WerMine, {}, "W mining Kalimantan");
+
+//add the Kalimantan rivers layer
+Map.addLayer(river, {color: '466b9f'}, "Rivers");
 
 //merge the training class
 var classNames = ASGM.merge(Forest).merge(nonforestVeg).merge(settlements).merge(bareSoil).merge(waterBody);
@@ -1311,7 +1318,7 @@ function maskImage(image) {
 //                      END OF CLOUD AND SHADOW MASKING FOR SENTINEL 2             **
 //'***********************************************************************************
 
-// TERRAIN CORRECTION
+// TERRAIN CORRECTION // I think we dont need this terrain correction as most of the ASGM are in flat lowland
 
 // ======================= TERRAIN CORRECTIONS ==================== //
 var scale = 300;
@@ -1706,65 +1713,65 @@ var NBRl8 = compositel8.expression(
       'NIR': compositel8.select('B5'),
       'RED': compositel8.select('B4'),
       'SWIR': compositel8.select('B6')
-    });
+    }).rename('NBRl8');
 
 var MSWIl8 = compositel8.expression(
     '(1-NIR)/((NIR + SWIR) * (NIR - RED) * 100)', {
       'NIR': compositel8.select('B5'),
       'RED': compositel8.select('B4'),
       'SWIR': compositel8.select('B6')
-});
+}).rename('MSWIl8');
 
 var NDSIl8 = compositel8.expression(
     '(SWIR2 - BLUE)/(SWIR2 + BLUE)', {
       'BLUE': compositel8.select('B2'),
       'SWIR2': compositel8.select('B7') //CHANGE TO B11 FOR s2
-});
+}).rename('NDSIl8');
 
 var NDWIl8 = compositel8.expression(
     '(GREEN - NIR)/(GREEN + NIR)', {
       'GREEN': compositel8.select('B3'),
       'NIR': compositel8.select('B5') //CHANGE TO B8 FOR s2
-});
+}).rename('NDWIl8');
 
 var BIal8 = compositel8.expression(
     'sqrt((RED)**2 + (GREEN)**2 + (NIR)**2)',{
       'GREEN': compositel8.select('B3'),
       'NIR': compositel8.select('B5'), //CHANGE TO B5 FOR L8
       'RED': compositel8.select('B4')  
-});
+}).rename('BIal8');
 
 var BIbl8 = compositel8.expression(
     'sqrt((RED)**2 + (GREEN)**2)',{
       'GREEN': compositel8.select('B3'),
       'RED': compositel8.select('B4')  
-});
+}).rename('BIbl8');
 
 var NDBIl8 = compositel8.expression(
     '(SWIR2 - NIR)/(SWIR2 + NIR)', {
       'SWIR2': compositel8.select('B7'), //CHANGE TO B7 FOR L8
       'NIR': compositel8.select('B5') 
-});
+}).rename('NDBIl8');
 
 var BSIl8 = compositel8.expression(
     '((SWIR2 + RED) - (SWIR2 + BLUE))/((SWIR2 + RED) + (SWIR2 + BLUE))', {
       'SWIR2': compositel8.select('B7'), //CHANGE TO B7 FOR L8
       'RED': compositel8.select('B4'),
       'BLUE': compositel8.select('B2')
-});
+}).rename('BSIl8');
 
 
 var MSAVIl8 = compositel8.expression(
     '(2 * NIR + 1 - sqrt (((2 * NIR + 1)**2) - 8 * (NIR - RED)))', {
       'RED': compositel8.select('B4'),
       'NIR': compositel8.select('B5') //CHANGE TO B8 for S2
-});
+}).rename('MSAVIl8');
 
 var MBSIl8 = compositel8.expression(
     '((RED - GREEN)*2)/((RED + GREEN)-2)', {
       'RED': compositel8.select('B4'), //CHANGE TO B4 FOR L8
       'GREEN': compositel8.select('B3') 
-});
+}).rename('MBSIl8');
 
 
 
@@ -1774,65 +1781,65 @@ var NBRs2 = s2composite.expression(
       'NIR': s2composite.select('sB8'),
       'RED': s2composite.select('sB4'),
       'SWIR': s2composite.select('sB11')
-    });
+    }).rename('NBRs2');
 
 var MSWIs2 = s2composite.expression(
     '(1-NIR)/((NIR + SWIR) * (NIR - RED) * 100)', {
       'NIR': s2composite.select('sB8'),
       'RED': s2composite.select('sB4'),
       'SWIR': s2composite.select('sB11')
-});
+}).rename('MSWIs2');
 
 var NDSIs2 = s2composite.expression(
     '(SWIR2 - BLUE)/(SWIR2 + BLUE)', {
       'BLUE': s2composite.select('sB2'),
       'SWIR2': s2composite.select('sB12') //CHANGE TO B11 FOR s2
-});
+}).rename('NDSIs2');
 
 var NDWIs2 = s2composite.expression(
     '(GREEN - NIR)/(GREEN + NIR)', {
       'GREEN': s2composite.select('sB3'),
       'NIR': s2composite.select('sB8') //CHANGE TO B8 FOR s2
-});
+}).rename('NDWIs2');
 
 var Bias2 = s2composite.expression(
     'sqrt((RED)**2 + (GREEN)**2 + (NIR)**2)',{
       'GREEN': s2composite.select('sB3'),
       'NIR': s2composite.select('sB8'), //CHANGE TO B5 FOR L8
       'RED': s2composite.select('sB4')  
-});
+}).rename('Bias2');
 
 var Bibs2 = s2composite.expression(
     'sqrt((RED)**2 + (GREEN)**2)',{
       'GREEN': s2composite.select('sB3'),
       'RED': s2composite.select('sB4')  
-});
+}).rename('Bibs2');
 
 var NDBIs2 = s2composite.expression(
     '(SWIR2 - NIR)/(SWIR2 + NIR)', {
       'SWIR2': s2composite.select('sB12'), //CHANGE TO B7 FOR L8
       'NIR': s2composite.select('sB8') 
-});
+}).rename('NDBIs2');
 
 var BSIs2 = s2composite.expression(
     '((SWIR2 + RED) - (SWIR2 + BLUE))/((SWIR2 + RED) + (SWIR2 + BLUE))', {
       'SWIR2': s2composite.select('sB12'), //CHANGE TO B7 FOR L8
       'RED': s2composite.select('sB4'),
       'BLUE': s2composite.select('sB2')
-});
+}).rename('BSIs2');
 
 
 var MSAVIs2 = s2composite.expression(
     '(2 * NIR + 1 - sqrt (((2 * NIR + 1)**2) - 8 * (NIR - RED)))', {
       'RED': s2composite.select('sB4'),
       'NIR': s2composite.select('sB8') //CHANGE TO B8 for S2
-});
+}).rename('MSAVIs2');
 
 var MBSIs2 = s2composite.expression(
     '((RED - GREEN)*2)/((RED + GREEN)-2)', {
       'RED': s2composite.select('sB4'), //CHANGE TO B4 FOR L8
       'GREEN': s2composite.select('sB3') 
-});
+}).rename('MBSIs2');
 
 //                       Sentinel 1 INDICES                          //
 
@@ -1840,14 +1847,14 @@ var mRFDI = s1composite.expression(
     '((VV - VH) / (VV + VH))', {
       'VV': s1composite.select('s1vv'),
       'VH': s1composite.select('s1vh')
-});
+}).rename('mRFDI');
 
 
 var DPSVI = s1composite.expression(
     '((VV + VH) / VV)', {
       'VV': s1composite.select('s1vv'),
       'VH': s1composite.select('s1vh')
-});
+}).rename('DPSVI');
 
 
 // visualization for Indices
@@ -2018,25 +2025,245 @@ var allimages = allimages.addBands(DPSVI);
 ////checking the name of band names again
 print(allimages.bandNames());
 
-var bands = ['B1', 'HV','B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11','s1vh', 's1vv', 'sB3','sB4','sB5', 'constant',
-'B7_1','B3_1','B4_1', 'B4_2','B7_2', 'B7_3','constant_1', 'B4_3', 'B5_1','constant_2', 'sB12_1', 'sB3_1', 'sB12_2',
-'sB12_3', 'constant_3', 'sB4_3', 'sB8_1', 's1vv_1', 's1vv_2' ];
 
+// This is the original 49 bands
+//var bands = ['B1', 'HV','B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11','s1vh', 's1vv', 'sB3','sB4','sB5', 'constant',
+//'B7_1','B3_1','B4_1', 'B4_2','B7_2', 'B7_3','constant_1', 'B4_3', 'B5_1','constant_2', 'sB12_1', 'sB3_1', 'sB12_2',
+//'sB12_3', 'constant_3', 'sB4_3', 'sB8_1', 's1vv_1', 's1vv_2' ];
+
+
+
+//===================THIS IS USING THE MOST PARSIMONIOUS MODEL======================================
+var bands = ['HV', 's1vh', 'sB11', 'MSWIs2', 's1vv', 'B10', 'MSAVIs2', 'BSIs2', 'NDWIs2', 'sB5',
+'BIal8', 'mRFDI' ];
+//===================================================================================================
+
+//this is just some of the bands to avoid user memory limits
+/*
+var bands = ['HV','s1vh', 's1vv','B3_1','B4_1', 'B4_2','B7_2','B4_3', 'B5_1','constant_2', 'sB12_1', 'sB3_1', 'sB12_2',
+'sB12_3', 'constant_3', 'sB4_3', 'sB8_1', 's1vv_1', 's1vv_2' ];
 // var bands = ['B1', 'HV','B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11','s1vh', 's1vv', 'sB3','sB4','sB5', 'MSWIl8',
 // 'NDSIl8','NDWIl8','BIal8', 'BIbl8','NDBIl8', 'BSIl8','MSAVIl8', 'MBSIl8'];
+*/
 
 ////checking the name of band names again
-print(allimages.bandNames());
+//print(bands.bandNames());
 
 
 
-//***************************************
-// start of the RF classification 
-/*************************************
+//================================NUMTREES AND BAGFRAC ANALYSIS=============================================//
+// Tune the numberOfTrees and bagFraction parameters.
+var training = allimages.select(bands).sampleRegions({
+  collection: classNames,  ///set this equal to the training data you wish to use mygeeclasses or mygee or what ever else you have defined.
+  properties: ['landcover'],
+  scale: 30
+});
+
+//merge the Test class
+var classNamesTest = TASGM.merge(TForest).merge(TnonforestVeg).merge(Tsettlements).merge(TbareSoil).merge(TwaterBody);
+
+// https://courses.spatialthoughts.com/end-to-end-gee.html#accuracy-assessment
+// Use classification map to assess accuracy using the validation fraction
+// of the overall training set created above.
+var test = allimages.select(bands).sampleRegions({
+  collection: classNamesTest,
+  properties: ['landcover'],
+  scale: 30,
+});
+
+// ======================= NEW METHOD OF BATCHING ===============================//
+
+var numTreesList = ee.List.sequence(10, 150, 10);
+var bagFractionList = ee.List.sequence(0.1, 0.9, 0.1);
+
+var batchSize = 15;  // Adjust as necessary
+
+// Create a parameter list of [numTrees, bagFraction] pairs
+var parameterPairs = numTreesList.map(function(numTrees) {
+  return bagFractionList.map(function(bagFraction) {
+    return ee.Feature(null, {numTrees: numTrees, bagFraction: bagFraction});
+  }).flatten();
+}).flatten();
+
+var totalTasks = parameterPairs.size().getInfo();
+var nBatches = Math.ceil(totalTasks / batchSize);
+
+for (var iBatch = 0; iBatch < nBatches; iBatch++) {
+  var start = iBatch * batchSize;
+  var end = ((iBatch + 1) * batchSize > totalTasks) ? totalTasks : (iBatch + 1) * batchSize;
+
+  var parameterBatch = ee.FeatureCollection(parameterPairs.slice(start, end));
+  var resultsBatch = parameterBatch.map(function(feature) {
+    var numTrees = feature.getNumber('numTrees');
+    var bagFraction = feature.getNumber('bagFraction');
+    
+    var classifier = ee.Classifier.smileRandomForest({
+      numberOfTrees: numTrees,
+      bagFraction: bagFraction
+    }).setOutputMode('CLASSIFICATION').train({
+      features: training,
+      classProperty: 'landcover',
+      inputProperties: bands
+    });
+
+    var accuracy = test
+      .classify(classifier)
+      .errorMatrix('landcover', 'classification')
+      .accuracy();
+
+    return feature.set({accuracy: accuracy});
+  });
+
+  // Export the batch to Drive
+  Export.table.toDrive({
+    collection: resultsBatch,
+    description: 'Hyperparameter_Tuning_Results_Batch_' + iBatch.toString(),
+    folder: 'CLASSIFICATIONRESULTS_GEE_2022',
+    fileFormat: 'CSV'
+  });
+}
 
 
 
-// THIS IS THE NORMAL DEFAULT WAY OF CLASSIFICATION
+// =-================== END NEW METHOD OF BATCHING ===============================//
+
+
+// ==================== WITHOUT BATCHING =================================//
+/*
+var numTreesList = ee.List.sequence(10, 150, 10);
+var bagFractionList = ee.List.sequence(0.1, 0.9, 0.1);
+
+var results = numTreesList.map(function(numTrees) {
+  return bagFractionList.map(function(bagFraction) {
+    var classifier = ee.Classifier.smileRandomForest({
+      numberOfTrees: numTrees,
+      bagFraction: bagFraction
+    }).train({
+        features: training,
+        classProperty: 'landcover',
+        inputProperties: bands
+    });
+
+    var accuracy = test
+      .classify(classifier)
+      .errorMatrix('landcover', 'classification')
+      .accuracy();
+
+    return ee.Feature(null, {accuracy: accuracy, numTrees: numTrees, bagFraction: bagFraction});
+  });
+}).flatten();
+
+var resultsFeatureCollection = ee.FeatureCollection(results);
+print(resultsFeatureCollection, 'resultsFeatureCollection');
+*/
+
+
+
+// =========================== END ========================================//
+
+
+//============ USING BATCH ===================================//
+/*
+// Define the batch number and total number of batches
+var nBatch = 15;
+var iBatch = 0; // You'll need to manually change this from 0 to 9
+
+var numTreesList = ee.List.sequence(10, 150, 10);
+var bagFractionList = ee.List.sequence(0.1, 0.9, 0.1);
+
+// Compute the size of each batch
+var batchSizeNumTrees = Math.ceil(numTreesList.length().getInfo() / nBatch);
+var batchSizeBagFraction = Math.ceil(bagFractionList.length().getInfo() / nBatch);
+
+// Define the start and end indices for this batch
+var startNumTrees = iBatch * batchSizeNumTrees;
+var endNumTrees = startNumTrees + batchSizeNumTrees;
+
+var startBagFraction = iBatch * batchSizeBagFraction;
+var endBagFraction = startBagFraction + batchSizeBagFraction;
+
+// Get the parameters for this batch
+var numTreesBatch = numTreesList.slice(startNumTrees, endNumTrees);
+var bagFractionBatch = bagFractionList.slice(startBagFraction, endBagFraction);
+
+var results = numTreesBatch.map(function(numTrees) {
+  return bagFractionBatch.map(function(bagFraction) {
+    var classifier = ee.Classifier.smileRandomForest({
+      numberOfTrees: numTrees,
+      bagFraction: bagFraction
+    }).train({
+        features: training,
+        classProperty: 'landcover',
+        inputProperties: bands
+    });
+
+    var accuracy = test
+      .classify(classifier)
+      .errorMatrix('landcover', 'classification')
+      .accuracy();
+
+    return ee.Feature(null, {accuracy: accuracy, numTrees: numTrees, bagFraction: bagFraction});
+  });
+}).flatten();
+
+var resultsFeatureCollection = ee.FeatureCollection(results);
+
+// Print results to console to check
+print(resultsFeatureCollection, 'resultsFeatureCollection');
+
+// Export the results as a CSV file to your Google Drive
+var fileName = 'Hyperparameter_Tuning_Results_Batch_' + iBatch.toString();
+Export.table.toDrive({
+  collection: resultsFeatureCollection,
+  description: fileName,
+  folder: 'CLASSIFICATIONRESULTS_GEE_2022',
+  fileFormat: 'CSV'
+});
+*/
+//============================== END OF BATCHING ===================================//
+
+/*
+// Convert the results to a FeatureCollection
+var resultsCollection = ee.FeatureCollection(results.map(function(el) {
+  el = ee.List(el); // Cast to list
+  return ee.Feature(null, {
+    'accuracy': el.get(0),
+    'numTrees': el.get(1),
+    'bagFraction': el.get(2)
+  });
+}));
+
+// Export the results as a CSV file to your Google Drive
+var fileName = 'Hyperparameter_Tuning_Results_Batch_' + iBatch.toString();
+Export.table.toDrive({
+  collection: resultsCollection,
+  description: fileName,
+  folder: 'CLASSIFICATIONRESULTS_GEE_2022',
+  fileFormat: 'CSV'
+});
+*/
+
+
+
+/*
+var chart = ui.Chart.array.values({
+  array: ee.Array(accuracies),
+  axis: 0,
+  xLabels: numTreesList,
+  yLabels: bagFractionList
+  }).setOptions({
+      title: 'Hyperparameter Tuning for the numberOfTrees and bagFraction Parameters',
+      vAxis: {title: 'Validation Accuracy'},
+      hAxis: {title: 'Number of Trees and Bag Fraction', gridlines: {count: 15}}
+  });
+
+print(chart);
+*/
+
+//=========================================================================================================//
+
+// ================ THIS IS THE NORMAL DEFAULT WAY OF CLASSIFICATION========================
+/*
 // Overlay the  on the imagery to get training data. That is the value of each band in the variable 'bands' above are
 var training = allimages.select(bands).sampleRegions({
   collection: classNames,  ///set this equal to the training data you wish to use mygeeclasses or mygee or what ever else you have defined.
@@ -2056,107 +2283,14 @@ print(bandValues);
 // in the 'Console' window on the right because it was printed in the line above.
 var trained = ee.Classifier.smileRandomForest(10).train(training, 'landcover', bands);
 
-// Classify the image with the same bands used for training. 'tained' is the actual decision tree model and can be applied to the
+// Classify the image with the same bands used for training. 'trained' is the actual decision tree model and can be applied to the
 // entire image
 var classified = allimages.select(bands).classify(trained);  //'classified' is my new classification map
 
+//=========================================================================================================//
 
 
 
-// ============== add spectral filtering to the classification ===========//
-
-// Overlay the sample data on the imagery to get training data. 
-/*var training = allimages.select(bands).sampleRegions({
-  collection: classNames,  //set this equal to the training data you wish to use mygeeclasses or mygee or what ever else you have defined.
-  properties: ['landcover'],
-  scale: 30
-});
-
-// Train a RF classifier with the training data
-var trained = ee.Classifier.smileRandomForest(10).train(training, 'landcover', bands);
-
-// Classify the image with the same bands used for training. 
-var classified = allimages.select(bands).classify(trained);  //'classified' is your new classification map
-
-// Define the threshold for spectral thresholding
-var threshold = 0.5;
-
-// Apply the threshold to the classified image
-var thresholded = classified.expression("b1 >= threshold ? b1 : 0", {b1: classified, threshold: threshold});
-*/
-
-
-
-
-//********************************************************//
-// Adding spectral and texture filtering to the classsification //
-//           Hope it works! please GOD.                        //
-//*************************************************************/
-var classNameDict = ee.Dictionary({
-0: "ASGM",
-1: "Forest",
-2: "nonforestVeg",
-3: "settlements",
-4: "baresoil",
-5: "waterbody"
-});
-
-// Overlay the sample data on the imagery to get training data.
-var training = allimages.select(bands).sampleRegions({
-collection: classNames, //set this equal to the training data you wish to use mygeeclasses or mygee or what ever else you have defined.
-properties: ['landcover'],
-scale: 30
-});
-
-// Train a RF classifier with the training data
-var trained = ee.Classifier.smileRandomForest(10).train(training, 'landcover', bands);
-
-// Classify the image with the same bands used for training.
-var classified = allimages.select(bands).classify(trained); //'classified' is your new classification map
-
-// Define the threshold for spectral thresholding
-var threshold = 0.5;
-
-// Apply the threshold to the classified image
-var thresholded = classified.expression("b1 >= threshold ? b1 : 0", {b1: classified, threshold: threshold});
-
-// Apply texture analysis
-var texture = allimages.select(bands).reduceNeighborhood({
-reducer: ee.Reducer.stdDev(),
-kernel: ee.Kernel.square(5)
-});
-
-// Combine the classified image and the texture image
-var combined = thresholded.addBands(texture).rename(["classification", "texture"]);
-
-// Train a new classifier on the combined image
-var combinedTrained = ee.Classifier.smileRandomForest(10).train(combined, "classification", ["classification", "texture"]);
-
-// Classify the combined image with the new classifier
-var combinedClassified = combined.classify(combinedTrained);
-
-// Get the class ID for the classified image
-var finalClassification = combinedClassified.expression("b1 >= 0 ? b1 : 0", {b1: combinedClassified});
-
-// Convert class ID to class name
-var classNamesList = classNameDict.keys().getInfo();
-var finalClassificationWithNames = finalClassification.remap(classNameDict, classNamesList);
-// Set the color palette for visualization
-var mypalette=[  'red', // ASGM
-  'black', // Forest
-  'blue', //  nonforestVeg
-  'green',  // settlements
-  'yellow', // baresoil
-  'cyan', //waterbody
-];
-
-// Display the final classified image with class names
-Map.addLayer(finalClassificationWithNames, {palette: mypalette, min: 0, max: 5}, "final classification");
-
-
-//==============================================================================//
-//                              END OF THE FILTERING                           //
-//==============================================================================//
 
 // Display the inputs and the results.
 
@@ -2171,16 +2305,25 @@ var mypalette=[  'red', // ASGM
  
 ];
 
-Map.addLayer(thresholded, {min: 0, max: 1, palette: ['blue', 'red']}, 'Thresholded Image');
-Map.addLayer(combinedClassified, {min: 0, max: 1, palette: ['blue', 'red']}, 'Combined Classified Image');
+//Map.addLayer(thresholded, {min: 0, max: 1, palette: ['blue', 'red']}, 'Thresholded Image');
+//Map.addLayer(combinedClassified, {min: 0, max: 1, palette: ['blue', 'red']}, 'Combined Classified Image');
              
-Map.addLayer(classified, //displaying the classification map
-             {min: 0, max: 6, palette: mypalette},  // using my choice of color for each class
-             'Classification'); // call this layer 'classification
+//Map.addLayer(classified, //displaying the classification map
+//             {min: 0, max: 6, palette: mypalette},  // using my choice of color for each class
+//             'Classification'); // call this layer 'classification
              
 
+
+
+
+var visum = ['red']
+var classifiedMasked = classified.updateMask(classified.eq(0))
+Map.addLayer(classifiedMasked, {min: 0, max: 0, palette: mypalette}, 'classifiedmask')
 //add all the necessary polygon for this
-Map.addLayer(MineKal, {}, "Mines in Kalimantan");
+//Map.addLayer(MineKal, {}, "Mines in Kalimantan");
+
+
+Map.addLayer(ASGMonly, {color: 'FF0000'}, "ASGMonly")
 
 //***************************************
 // End of the RF classification 
@@ -2248,6 +2391,108 @@ Export.table.toDrive({
   fileNamePrefix: 'accuracy',
   fileFormat: 'CSV'
 });
+
+
+
+// ============== add spectral filtering to the classification ===========//
+/*
+// Overlay the sample data on the imagery to get training data. 
+var training = allimages.select(bands).sampleRegions({
+  collection: classNames,  //set this equal to the training data you wish to use mygeeclasses or mygee or what ever else you have defined.
+  properties: ['landcover'],
+  scale: 30
+});
+
+// Train a RF classifier with the training data
+var trained = ee.Classifier.smileRandomForest(10).train(training, 'landcover', bands);
+
+// Classify the image with the same bands used for training. 
+var classified = allimages.select(bands).classify(trained);  //'classified' is your new classification map
+
+// Define the threshold for spectral thresholding
+var threshold = 0.5;
+
+// Apply the threshold to the classified image
+var thresholded = classified.expression("b1 >= threshold ? b1 : 0", {b1: classified, threshold: threshold});
+*/
+
+
+
+
+//********************************************************//
+// Adding spectral and texture filtering to the classsification //
+//           Hope it works! please GOD.                        //
+//*************************************************************/
+
+/*
+var classNameDict = ee.Dictionary({
+0: "ASGM",
+1: "Forest",
+2: "nonforestVeg",
+3: "settlements",
+4: "baresoil",
+5: "waterbody"
+});
+
+// Overlay the sample data on the imagery to get training data.
+var training = allimages.select(bands).sampleRegions({
+collection: classNames, //set this equal to the training data you wish to use mygeeclasses or mygee or what ever else you have defined.
+properties: ['landcover'],
+scale: 30
+});
+
+// Train a RF classifier with the training data
+var trained = ee.Classifier.smileRandomForest(10).train(training, 'landcover', bands);
+
+// Classify the image with the same bands used for training.
+var classified = allimages.select(bands).classify(trained); //'classified' is your new classification map
+
+// Define the threshold for spectral thresholding
+var threshold = 0.5;
+
+// Apply the threshold to the classified image
+var thresholded = classified.expression("b1 >= threshold ? b1 : 0", {b1: classified, threshold: threshold});
+
+// Apply texture analysis
+var texture = allimages.select(bands).reduceNeighborhood({
+reducer: ee.Reducer.stdDev(),
+kernel: ee.Kernel.square(5)
+});
+
+// Combine the classified image and the texture image
+var combined = thresholded.addBands(texture).rename(["classification", "texture"]);
+
+// Train a new classifier on the combined image
+var combinedTrained = ee.Classifier.smileRandomForest(10).train(combined, "classification", ["classification", "texture"]);
+
+// Classify the combined image with the new classifier
+var combinedClassified = combined.classify(combinedTrained);
+
+// Get the class ID for the classified image
+var finalClassification = combinedClassified.expression("b1 >= 0 ? b1 : 0", {b1: combinedClassified});
+
+// Convert class ID to class name
+var classNamesList = classNameDict.keys().getInfo();
+var finalClassificationWithNames = finalClassification.remap(classNameDict, classNamesList);
+// Set the color palette for visualization
+var mypalette=[  'red', // ASGM
+  'black', // Forest
+  'blue', //  nonforestVeg
+  'green',  // settlements
+  'yellow', // baresoil
+  'cyan', //waterbody
+];
+
+// Display the final classified image with class names
+Map.addLayer(finalClassificationWithNames, {palette: mypalette, min: 0, max: 5}, "final classification");
+
+*/
+//==============================================================================//
+//                              END OF THE FILTERING                           //
+//==============================================================================//
+
+
+
 
 
 //************************************************************************** 
@@ -2320,7 +2565,7 @@ Map.addLayer(PABorneo, {}, "PA in Borneo");
 
 // im not sure how to refactore this
 
-Map.addLayer(ASGMhotspot, {}, "ASGM hotspots");
+//Map.addLayer(ASGMhotspot, {}, "ASGM hotspots");
 
 
 
