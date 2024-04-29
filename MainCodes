@@ -2553,19 +2553,7 @@ Map.addLayer(PABorneo, {}, "PA in Borneo");
 //******************************************************************
 
 
-// Questions i need to ask Stuart
-// 1. what is the acceptable level of false positive/ false negative / overal error acceptable for small-scale distubances
-// 2. Is it better to have polygon or points as training or test dataset?
-// 3. is there any unnecessary post-processing method that is needed for some types of data used in the model 
-// 4. is it better to just map binary ASGM/non-ASGM
-// 5. is PCA a better ofpiton to reduce the processing power needed
 
-
-// optimize the cod by dicing the data
-
-// im not sure how to refactore this
-
-//Map.addLayer(ASGMhotspot, {}, "ASGM hotspots");
 
 
 
