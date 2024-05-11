@@ -63,10 +63,6 @@ Map.addLayer(compositel8,{bands:['B4','B3','B2'],min:300,max:3000},
              'Composite L8 2021');
 
 
-// WHAT BAND(S) IS BEST USED FOR ASSM MAPPING
-// DO I ALSO NEED TO CONDUCT SPATIAL ANALYSIS ON WHICH BANDS IS/ARE THE BEST?
-
-// maybe add the OIM-MSWI ratio??
 
 /// ------ ADDING Sentinel 2 products ----- /////
 // We will use the Sentinel-2 Surface Reflection product.
